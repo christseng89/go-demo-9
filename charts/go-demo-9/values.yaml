@@ -1,16 +1,15 @@
-replicaCount: 1
 image:
-  repository: vfarcic/go-demo-9
-  tag: 0.0.1
+  repository: jsuarezm/go-demo-9
+  tag: latest
   pullPolicy: IfNotPresent
-
-env: {}
 
 service:
   type: ClusterIP
   externalPort: 80
   internalPort: 8080
-  annotations: {}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
 resources:
   limits:
     cpu: 100m
@@ -34,12 +33,15 @@ ingress:
   host: go-demo-9.acme.com
 
 hpa:
-  enabled: true
-  minReplicas: 2
+  enabled: false
+  minReplicas: 3
   maxReplicas: 6
   cpuTargetAverageUtilization: 80
   memoryTargetAverageUtilization: 80
 
+istio:
+  enabled: false
+
 go-demo-9-db:
-  replicaSet:
-    enabled: true
+  auth:
+    enabled: false

@@ -10,14 +10,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-var coll *mgo.Collection
+var coll *mongo.Collection
+var ctx context.Context
 var sleep = time.Sleep
 var logFatal = log.Fatal
 var logPrintf = log.Printf
@@ -69,11 +73,23 @@ func setupDb() {
 		db = "localhost"
 	}
 	logPrintf("Configuring DB %s\n", db)
-	session, err := mgo.Dial(db)
+	client, err := mongo.NewClient(options.Client().ApplyURI(db))
 	if err != nil {
 		panic(err)
 	}
-	coll = session.DB("test").C("people")
+	ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
+	err = client.Connect(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = client.Ping(ctx, readpref.Primary())
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Connected ...")
+	defer client.Disconnect(ctx)
+	
+	coll = client.Database("test").Collection("people")
 }
 
 func RunServer() {
@@ -175,9 +191,12 @@ func PersonServer(w http.ResponseWriter, req *http.Request) {
 		}
 	} else {
 		var res []Person
-		if err := findPeople(&res); err != nil {
+		cur, err := findPeople()
+		if err != nil {
 			panic(err)
 		}
+		err2 := cur.Decode(&res)
+  	if err2 != nil { panic(err2) }
 		var names []string
 		for _, p := range res {
 			names = append(names, p.Name)
@@ -192,12 +211,15 @@ var prometheusHandler = func() http.Handler {
 	return prometheus.Handler()
 }
 
-var findPeople = func(res *[]Person) error {
-	return coll.Find(bson.M{}).All(res)
+var findPeople = func() (cur *mongo.Cursor, err error){
+	filter := bson.M{}
+	return coll.Find(ctx, filter)
 }
 
-var upsertId = func(id interface{}, update interface{}) (info *mgo.ChangeInfo, err error) {
-	return coll.UpsertId(id, update)
+var upsertId = func(id interface{}, update interface{}) (info *mongo.UpdateResult, err error) {
+	opts := options.Update().SetUpsert(true)
+	updateInput := bson.D{{"$set", update}}
+	return coll.UpdateByID(ctx, id, updateInput, opts)
 }
 
 func recordMetrics(start time.Time, req *http.Request, code int) {
