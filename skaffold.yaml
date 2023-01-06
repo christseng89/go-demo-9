@@ -4,7 +4,7 @@ metadata:
   name: go-demo-9
 build:
   local:
-    push: true
+    push: false
   artifacts:
     - image: go-demo-9
       docker: {}
@@ -23,6 +23,8 @@ deploy:
         version: 0.0.1
         setValueTemplates:
           ingress.host: "{{ .ADDR }}"
+          image.repository: "{{.IMAGE_REPO_go_demo_9}}"
+          image.tag: "{{.IMAGE_TAG_go_demo_9}}"
     flags:
       upgrade:
         - --install

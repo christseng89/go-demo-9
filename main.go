@@ -13,6 +13,7 @@ import (
 	"context"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/time/rate"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -20,6 +21,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
+var client *mongo.Client
 var coll *mongo.Collection
 var ctx context.Context
 var sleep = time.Sleep
@@ -55,6 +57,8 @@ func main() {
 	}
 	setupDb()
 	RunServer()
+
+	defer client.Disconnect(ctx)
 }
 
 func init() {
@@ -64,6 +68,7 @@ func init() {
 // TODO: Test
 
 func setupDb() {
+	var err error
 	envVar := "DB"
 	if len(os.Getenv("DB_ENV")) > 0 {
 		envVar = os.Getenv("DB_ENV")
@@ -72,7 +77,7 @@ func setupDb() {
 	if len(db) == 0 {
 		db = "localhost"
 	}
-	logPrintf("Configuring DB %s\n", db)
+	logPrintf("Connecting DB %s\n", db)
 	client, err := mongo.NewClient(options.Client().ApplyURI(db))
 	if err != nil {
 		panic(err)
@@ -86,9 +91,7 @@ func setupDb() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Connected ...")
-	defer client.Disconnect(ctx)
-	
+	log.Println("Connected ...")
 	coll = client.Database("test").Collection("people")
 }
 
@@ -183,9 +186,7 @@ func PersonServer(w http.ResponseWriter, req *http.Request) {
 	msg := "Everything is OK"
 	if req.Method == "PUT" {
 		name := req.URL.Query().Get("name")
-		if _, err := upsertId(name, &Person{
-			Name: name,
-		}); err != nil {
+		if _, err := upsertName(name); err != nil {
 			code = http.StatusInternalServerError
 			msg = err.Error()
 		}
@@ -195,8 +196,9 @@ func PersonServer(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			panic(err)
 		}
-		err2 := cur.Decode(&res)
-  	if err2 != nil { panic(err2) }
+		if err = cur.All(ctx, &res); err != nil {
+			panic(err)
+		}
 		var names []string
 		for _, p := range res {
 			names = append(names, p.Name)
@@ -208,18 +210,20 @@ func PersonServer(w http.ResponseWriter, req *http.Request) {
 }
 
 var prometheusHandler = func() http.Handler {
-	return prometheus.Handler()
+	return promhttp.Handler()
 }
 
 var findPeople = func() (cur *mongo.Cursor, err error){
-	filter := bson.M{}
-	return coll.Find(ctx, filter)
+	setupDb()
+	return coll.Find(ctx, bson.D{})
 }
 
-var upsertId = func(id interface{}, update interface{}) (info *mongo.UpdateResult, err error) {
+var upsertName = func(name string) (info *mongo.UpdateResult, err error) {
+	setupDb()
+	filter:= bson.D{{"name", name}}
+	update := bson.D{{"$set", bson.D{{"name", name}}}}
 	opts := options.Update().SetUpsert(true)
-	updateInput := bson.D{{"$set", update}}
-	return coll.UpdateByID(ctx, id, updateInput, opts)
+        return coll.UpdateOne(ctx, filter, update, opts)
 }
 
 func recordMetrics(start time.Time, req *http.Request, code int) {
