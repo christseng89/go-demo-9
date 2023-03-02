@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context" //required by mongo driver
 	"fmt"
 	"io"
 	"log"
@@ -10,11 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"context" //required by mongo driver
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"  // required for the prometheus handle
+	"github.com/prometheus/client_golang/prometheus/promhttp" // required for the prometheus handle
 	"golang.org/x/time/rate"
+
 	// mongo driver
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -80,9 +81,10 @@ func setupDb() {
 	}
 	// DB URI starts with mongodb://
 	logPrintf("Connecting DB %s\n", db)
-	client, err := mongo.NewClient(options.Client().ApplyURI(db))
+	// client, err := mongo.NewClient(options.Client().ApplyURI(db))
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://go-demo-9-go-demo-9-db")) // Hardcoded for now
 	if err != nil {
-		panic(err)
+		panic(db + "Error: " + err.Error())
 	}
 	ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
 	err = client.Connect(ctx)
@@ -215,17 +217,17 @@ var prometheusHandler = func() http.Handler {
 	return promhttp.Handler() // new version
 }
 
-var findPeople = func() (cur *mongo.Cursor, err error){
+var findPeople = func() (cur *mongo.Cursor, err error) {
 	setupDb()
 	return coll.Find(ctx, bson.D{})
 }
 
 var upsertName = func(name string) (info *mongo.UpdateResult, err error) {
 	setupDb()
-	filter:= bson.D{{"name", name}}
+	filter := bson.D{{"name", name}}
 	update := bson.D{{"$set", bson.D{{"name", name}}}}
 	opts := options.Update().SetUpsert(true)
-        return coll.UpdateOne(ctx, filter, update, opts)
+	return coll.UpdateOne(ctx, filter, update, opts)
 }
 
 func recordMetrics(start time.Time, req *http.Request, code int) {
